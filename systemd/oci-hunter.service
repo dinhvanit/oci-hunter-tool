@@ -1,0 +1,20 @@
+[Unit]
+Description=oci-hunter - Oracle Cloud Always Free instance hunter
+Documentation=file://__DIR__/README.md
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=900
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=__USER__
+WorkingDirectory=__DIR__
+ExecStart=/usr/bin/env bash __DIR__/hunter.sh
+Restart=on-failure
+RestartSec=60
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

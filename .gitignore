@@ -1,0 +1,5 @@
+.env
+*.log
+*.log.1
+.hunter-state
+.DS_Store
