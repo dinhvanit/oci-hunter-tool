@@ -17,6 +17,10 @@ if ! command -v oci >/dev/null 2>&1; then
   export PATH="$HOME/bin:$HOME/lib/oracle-cli/bin:$PATH"
 fi
 
+# oci-cli 3.9x in cảnh báo "append OCI_API_KEY" ra stdout trước JSON khi chưa
+# thêm nhãn vào key file — tắt cảnh báo và luôn lọc lấy phần JSON.
+export SUPPRESS_LABEL_WARNING=True
+
 ENV_FILE="$ROOT_DIR/.env"
 LOG_FILE="$ROOT_DIR/hunter.log"
 STATE_FILE="$ROOT_DIR/.hunter-state"
@@ -78,6 +82,11 @@ log_detail() {
 die() {
   log ERROR "$*"
   exit 1
+}
+
+# Chỉ giữ phần JSON trong output của oci-cli (bỏ dòng cảnh báo phía trước)
+json_only() {
+  sed -n '/^{/,$p' <<<"$1"
 }
 
 # -----------------------------------------------------------------------------
@@ -254,7 +263,7 @@ launch_instance() {
 
 is_success() {
   local response="$1" state
-  state="$(jq -r '.data."lifecycle-state" // .data.lifecycleState // empty' <<<"$response" 2>/dev/null || true)"
+  state="$(json_only "$response" | jq -r '.data."lifecycle-state" // .data.lifecycleState // empty' 2>/dev/null || true)"
   [[ "$state" == "PROVISIONING" || "$state" == "RUNNING" || "$state" == "STARTING" ]]
 }
 
@@ -274,15 +283,15 @@ classify() {
 }
 
 resolve_public_ip() {
-  local instance_id="$1" ip="" i
+  local instance_id="$1" ip="" raw="" i
   if [[ "$instance_id" != ocid1.instance.* ]]; then
     printf 'chưa rõ'
     return 0
   fi
   for ((i = 0; i < 12; i++)); do
-    ip="$(oci compute instance list-vnics \
-      --instance-id "$instance_id" --output json 2>/dev/null \
-      | jq -r '.data[0]."public-ip" // empty' 2>/dev/null || true)"
+    raw="$(oci compute instance list-vnics \
+      --instance-id "$instance_id" --output json 2>&1 || true)"
+    ip="$(json_only "$raw" | jq -r '.data[0]."public-ip" // empty' 2>/dev/null || true)"
     if [[ -n "$ip" ]]; then
       printf '%s' "$ip"
       return 0
@@ -296,7 +305,7 @@ handle_success() {
   local response="$1" ad_short="$2"
   local instance_id public_ip
 
-  instance_id="$(jq -r '.data.id // empty' <<<"$response" 2>/dev/null || true)"
+  instance_id="$(json_only "$response" | jq -r '.data.id // empty' 2>/dev/null || true)"
   if [[ -z "$instance_id" ]]; then
     instance_id="$(grep -o '"id": *"ocid1\.instance[^"]*"' <<<"$response" | head -n 1 | sed -E 's/.*"(ocid1\.instance[^"]*)"/\1/' || true)"
   fi
@@ -367,6 +376,7 @@ doctor() {
 
   out="$(oci iam availability-domain list --compartment-id "$TENANCY_OCID" --output json 2>&1)" \
     || { log ERROR "Không gọi được OCI API:"; log_detail "$out"; exit 1; }
+  out="$(json_only "$out")"
 
   local -a found=()
   mapfile -t found < <(jq -r '.data[].name' <<<"$out")
@@ -387,13 +397,16 @@ doctor() {
 
   out="$(oci compute image get --image-id "$IMAGE_OCID" --output json 2>&1)" \
     || { log ERROR "Không đọc được image:"; log_detail "$out"; exit 1; }
+  out="$(json_only "$out")"
   log OK "Image: $(jq -r '.data."display-name"' <<<"$out") ($(jq -r '.data."operating-system"' <<<"$out"))"
 
   out="$(oci network subnet get --subnet-id "$SUBNET_OCID" --output json 2>&1)" \
     || { log ERROR "Không đọc được subnet:"; log_detail "$out"; exit 1; }
+  out="$(json_only "$out")"
   log OK "Subnet: $(jq -r '.data."display-name"' <<<"$out") ($(jq -r '.data."cidr-block"' <<<"$out"))"
 
   out="$(oci compute image list --compartment-id "$TENANCY_OCID" --shape "$SHAPE" --limit 1 --output json 2>&1)" || true
+  out="$(json_only "$out")"
   region="$(jq -r '.data[0].region // empty' <<<"$out" 2>/dev/null || true)"
   [[ -n "$region" ]] && log OK "Region: $region"
 

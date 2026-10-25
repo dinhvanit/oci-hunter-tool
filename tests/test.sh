@@ -35,6 +35,8 @@ write_mock_oci() {
   cat >"$bin/oci" <<'MOCK'
 #!/usr/bin/env bash
 dir="${MOCK_DIR:?}"
+# Giả lập cảnh báo mà oci-cli 3.9x in ra stdout trước JSON
+echo "Warning: To increase security of your API key located at /home/test/.oci/key.pem, append an extra line with 'OCI_API_KEY' at the end."
 if [[ "$1" == "compute" && "$2" == "instance" && "$3" == "launch" ]]; then
   IFS=',' read -ra queue <"$dir/sequence"
   head="${queue[0]:-success}"
@@ -193,6 +195,7 @@ suite_cli() {
       bash ./hunter.sh --check >"$dir/out.log" 2>&1 )
   check "--check exit 0" "[[ $? -eq 0 ]]"
   check "--check xác nhận AD hợp lệ" "grep -q 'AD hợp lệ' '$dir/out.log'"
+  check "--check đọc đúng số AD (bỏ qua cảnh báo oci-cli)" "grep -q 'Kết nối OCI OK — 2 availability domain' '$dir/out.log'"
   check "--check đọc được image/subnet" "grep -q 'Subnet: subnet1' '$dir/out.log'"
 }
 
@@ -217,6 +220,7 @@ suite_setup() {
   cat >"$d/bin/oci" <<MOCK
 #!/usr/bin/env bash
 echo "\$*" >> "$d/oci.log"
+echo "Warning: To increase security of your API key located at /home/test/.oci/key.pem, append an extra line with 'OCI_API_KEY' at the end."
 case "\$*" in
   *"--version"*) echo "3.0.0" ;;
   *"availability-domain list"*) echo '{"data":[{"name":"xx:ap-singapore-1-AD-1"},{"name":"xx:ap-singapore-1-AD-2"}]}' ;;
